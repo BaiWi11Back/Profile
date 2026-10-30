@@ -1,0 +1,75 @@
+name: Verify and deploy GitHub Pages
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+jobs:
+  verify-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Content and privacy tests
+        run: |
+          python3 -m unittest discover -s tests -v
+          node --check script.js
+      - name: Install isolated browser test dependencies
+        run: |
+          npm install --prefix "$RUNNER_TEMP/browser-tests" --no-save --package-lock=false playwright@1.64.1
+          "$RUNNER_TEMP/browser-tests/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Browser acceptance
+        env:
+          PLAYWRIGHT_MODULE: ${{ runner.temp }}/browser-tests/node_modules/playwright/index.mjs
+        run: |
+          python3 preview.py --port 4173 > "$RUNNER_TEMP/preview.log" 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid"' EXIT
+          curl --fail --retry 10 --retry-connrefused --retry-delay 1 http://127.0.0.1:4173/ --output /dev/null
+          node --test tests/browser.test.mjs
+      - name: Stage only public website files
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+          from preview import PUBLIC_FILES
+          output = Path('_site')
+          for route in sorted(PUBLIC_FILES):
+              source = Path(route.lstrip('/'))
+              target = output / source
+              target.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copyfile(source, target)
+          (output / '.nojekyll').touch()
+          print('Published files:')
+          for file in sorted(output.rglob('*')):
+              if file.is_file():
+                  print(file)
+          PY
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+  deploy:
+    needs: verify-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v5
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

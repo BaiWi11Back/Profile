@@ -1,0 +1,16 @@
+# Default deny: never commit client intake documents or internal planning.
+/*
+!/.gitignore
+!/index.html
+!/style.css
+!/script.js
+!/preview.py
+!/assets/
+!/research/
+!/tests/
+!/.github/
+!/DEPLOYMENT.md
+__pycache__/
+*.pyc
+node_modules/
+_site/
